@@ -1,10 +1,7 @@
-//! By convention, main.zig is where your main function lives in the case that
-//! you are building an executable. If you are making a library, the convention
-//! is to delete this file and start with root.zig instead.
+const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
@@ -17,16 +14,30 @@ pub fn main() !void {
 
     if (args.len < 2) return error.ExpectedFileName;
 
+    const output_file: ?[]u8 = if (args.len == 3) args[2] else null;
     const filename = args[1];
+    var file: []u8 = undefined;
 
-    // TODO: Try reading in chunks
-    // 1MB max size currently
-    const file = try std.fs.cwd().readFileAlloc(allocator, filename, 1024 * 1024);
+    if (std.mem.eql(u8, filename, "-")) {
+        const stdin = std.io.getStdIn().reader();
+        file = try stdin.readAllAlloc(allocator, 1024 * 1024);
+    } else {
+        // TODO: Try reading in chunks
+        // 1MB max size currently
+        file = try std.fs.cwd().readFileAlloc(allocator, filename, 1024 * 1024);
+    }
 
     const res = try removeDuplicateAdjacent(allocator, file);
-    try stdout.print("{s}", .{res});
 
-    try bw.flush();
+    if (output_file == null) {
+        try stdout.print("{s}", .{res});
+        try bw.flush();
+    } else {
+        const file_writer = try std.fs.cwd().createFile(output_file.?, .{});
+        defer file_writer.close();
+
+        try file_writer.writeAll(res);
+    }
 }
 
 fn removeDuplicateAdjacent(allocator: Allocator, file: []u8) ![]u8 {
@@ -52,25 +63,3 @@ fn removeDuplicateAdjacent(allocator: Allocator, file: []u8) ![]u8 {
     // The caller must free memory
     return res.toOwnedSlice();
 }
-
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    const global = struct {
-        fn testOne(input: []const u8) anyerror!void {
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(global.testOne, .{});
-}
-
-const std = @import("std");
-
-// This imports the separate module containing `root.zig`. Take a look in `build.zig` for details.
-// const lib = @import("ccuniq_lib");
