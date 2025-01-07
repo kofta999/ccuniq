@@ -4,7 +4,9 @@ const ArgIterator = std.process.ArgIterator;
 const testing = std.testing;
 
 const Config = struct {
+    /// Input file, if (-) is present get input from standard input
     input_file: ?[]const u8 = null,
+    /// Output file, if not present output to standard output
     output_file: ?[]const u8 = null,
     /// (-c, --count) adds a new first column that contains a count of the number of times a line appears in the input file
     count: bool = false,
@@ -311,27 +313,3 @@ test "uniq - edge cases" {
         try testing.expectEqualStrings(expected, result);
     }
 }
-
-// test "Config initialization" {
-//     // Test command line argument parsing
-//     {
-//         var args = [_][]const u8{ "exe", "-c", "input.txt", "output.txt" };
-//         var iter = std.process.ArgIterator.init(&args, 0);
-//         const config = Config.init(&iter);
-
-//         try testing.expect(config.count);
-//         try testing.expectEqualStrings("input.txt", config.input_file.?);
-//         try testing.expectEqualStrings("output.txt", config.output_file.?);
-//     }
-
-//     {
-//         var args = [_][]const u8{ "exe", "-d", "-u" };
-//         var iter = std.process.ArgIterator.init(&args, 0);
-//         const config = Config.init(&iter);
-
-//         try testing.expect(config.repeated);
-//         try testing.expect(config.unique);
-//         try testing.expect(config.input_file == null);
-//         try testing.expect(config.output_file == null);
-//     }
-// }
