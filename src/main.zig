@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArgIterator = std.process.ArgIterator;
+const testing = std.testing;
 
 const Config = struct {
     input_file: ?[]const u8 = null,
@@ -9,6 +10,8 @@ const Config = struct {
     count: bool = false,
     /// (-d, --repeated) outputs only repeated lines
     repeated: bool = false,
+    /// (-u) outputs only unique lines
+    unique: bool = false,
 
     fn streql(a: []const u8, b: []const u8) bool {
         return std.mem.eql(u8, a, b);
@@ -31,6 +34,8 @@ const Config = struct {
                 config.input_file = arg;
             } else if (streql(arg, "-d") or streql(arg, "--repeated")) {
                 config.repeated = true;
+            } else if (streql(arg, "-u")) {
+                config.unique = true;
             } else {
                 config.output_file = arg;
             }
@@ -62,7 +67,7 @@ pub fn main() !void {
         file = try std.fs.cwd().readFileAlloc(allocator, config.input_file.?, 1024 * 1024);
     }
 
-    const res = try uniq(allocator, file, config.count, config.repeated);
+    const res = try uniq(allocator, file, config);
     defer allocator.free(res);
 
     if (config.output_file == null) {
@@ -76,50 +81,257 @@ pub fn main() !void {
     }
 }
 
-fn uniq(allocator: Allocator, file: []u8, count: bool, repeated: bool) ![]u8 {
+fn uniq(allocator: Allocator, file: []const u8, config: Config) ![]u8 {
     var file_lines = std.mem.splitScalar(u8, file, '\n');
 
     var res = std.ArrayList(u8).init(allocator);
     // Won't do anything
     defer res.deinit();
 
-    var prev: []const u8 = file_lines.next().?;
     var i: u32 = 1;
 
-    while (file_lines.next()) |line| {
-        if (std.mem.eql(u8, prev, line)) {
+    while (file_lines.next()) |curr| {
+        const next = file_lines.peek() orelse "";
+
+        if (std.mem.eql(u8, curr, next)) {
             i += 1;
             continue;
         }
 
-        if (repeated) {
+        if (config.repeated) {
             if (i > 1) {
-                if (count) {
+                if (config.count) {
                     var buf: [256]u8 = undefined;
                     const str = try std.fmt.bufPrint(&buf, "{}", .{i});
 
                     try res.appendSlice(str);
                     try res.append(' ');
                 }
-                try res.appendSlice(prev);
+                try res.appendSlice(curr);
+                try res.append('\n');
+            }
+        } else if (config.unique) {
+            if (i == 1) {
+                if (config.count) {
+                    var buf: [256]u8 = undefined;
+                    const str = try std.fmt.bufPrint(&buf, "{}", .{i});
+
+                    try res.appendSlice(str);
+                    try res.append(' ');
+                }
+
+                try res.appendSlice(curr);
                 try res.append('\n');
             }
         } else {
-            if (count) {
+            if (config.count) {
                 var buf: [256]u8 = undefined;
                 const str = try std.fmt.bufPrint(&buf, "{}", .{i});
 
                 try res.appendSlice(str);
                 try res.append(' ');
             }
-            try res.appendSlice(prev);
+
+            try res.appendSlice(curr);
             try res.append('\n');
         }
 
-        prev = line;
         i = 1;
     }
 
     // The caller must free memory
     return res.toOwnedSlice();
 }
+
+test "uniq - basic functionality" {
+    const allocator = testing.allocator;
+
+    // Basic test with repeated lines
+    {
+        const input =
+            \\apple
+            \\apple
+            \\banana
+            \\cherry
+            \\cherry
+            \\
+        ;
+        const expected =
+            \\apple
+            \\banana
+            \\cherry
+            \\
+        ;
+        const config = Config{};
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    // Test with count flag
+    {
+        const input =
+            \\apple
+            \\apple
+            \\banana
+            \\cherry
+            \\cherry
+            \\
+        ;
+        const expected =
+            \\2 apple
+            \\1 banana
+            \\2 cherry
+            \\
+        ;
+        const config = Config{ .count = true };
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    // Test with repeated flag
+    {
+        const input =
+            \\apple
+            \\apple
+            \\banana
+            \\cherry
+            \\cherry
+            \\
+        ;
+        const expected =
+            \\apple
+            \\cherry
+            \\
+        ;
+        const config = Config{ .repeated = true };
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    // Test with unique flag
+    {
+        const input =
+            \\apple
+            \\apple
+            \\banana
+            \\cherry
+            \\cherry
+            \\
+        ;
+        const expected =
+            \\banana
+            \\
+        ;
+        const config = Config{ .unique = true };
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    // Test with repeated and count flags
+    {
+        const input =
+            \\apple
+            \\apple
+            \\banana
+            \\cherry
+            \\cherry
+            \\
+        ;
+        const expected =
+            \\2 apple
+            \\2 cherry
+            \\
+        ;
+        const config = Config{ .repeated = true, .count = true };
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+}
+
+test "uniq - edge cases" {
+    const allocator = testing.allocator;
+
+    // Empty input
+    {
+        const input = "";
+        const expected = "";
+        const config = Config{};
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    // Single line
+    {
+        const input = "apple\n";
+        const expected = "apple\n";
+        const config = Config{};
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    // All lines identical
+    {
+        const input =
+            \\same
+            \\same
+            \\same
+            \\
+        ;
+        const expected = "same\n";
+        const config = Config{};
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+
+    // No repeated lines
+    {
+        const input =
+            \\a
+            \\b
+            \\c
+            \\
+        ;
+        const expected =
+            \\a
+            \\b
+            \\c
+            \\
+        ;
+        const config = Config{};
+        const result = try uniq(allocator, input, config);
+        defer allocator.free(result);
+        try testing.expectEqualStrings(expected, result);
+    }
+}
+
+// test "Config initialization" {
+//     // Test command line argument parsing
+//     {
+//         var args = [_][]const u8{ "exe", "-c", "input.txt", "output.txt" };
+//         var iter = std.process.ArgIterator.init(&args, 0);
+//         const config = Config.init(&iter);
+
+//         try testing.expect(config.count);
+//         try testing.expectEqualStrings("input.txt", config.input_file.?);
+//         try testing.expectEqualStrings("output.txt", config.output_file.?);
+//     }
+
+//     {
+//         var args = [_][]const u8{ "exe", "-d", "-u" };
+//         var iter = std.process.ArgIterator.init(&args, 0);
+//         const config = Config.init(&iter);
+
+//         try testing.expect(config.repeated);
+//         try testing.expect(config.unique);
+//         try testing.expect(config.input_file == null);
+//         try testing.expect(config.output_file == null);
+//     }
+// }
