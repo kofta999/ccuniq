@@ -58,7 +58,8 @@ pub fn main() !void {
         file = try std.fs.cwd().readFileAlloc(allocator, config.input_file.?, 1024 * 1024);
     }
 
-    const res = try removeDuplicateAdjacent(allocator, file);
+    const res = try uniq(allocator, file, config.count);
+    defer allocator.free(res);
 
     if (config.output_file == null) {
         try stdout.print("{s}", .{res});
@@ -71,24 +72,35 @@ pub fn main() !void {
     }
 }
 
-fn removeDuplicateAdjacent(allocator: Allocator, file: []u8) ![]u8 {
+fn uniq(allocator: Allocator, file: []u8, count: bool) ![]u8 {
     var file_lines = std.mem.splitScalar(u8, file, '\n');
 
-    // TODO: Think of a better way, the res's length may be less or equal than the file.len
     var res = std.ArrayList(u8).init(allocator);
     // Won't do anything
     defer res.deinit();
 
     var prev: []const u8 = "";
+    var i: u32 = 1;
 
     while (file_lines.next()) |line| {
         if (std.mem.eql(u8, prev, line)) {
+            i += 1;
             continue;
         }
 
         prev = line;
+
+        if (count) {
+            var buf: [256]u8 = undefined;
+            const str = try std.fmt.bufPrint(&buf, "{}", .{i});
+
+            try res.appendSlice(str);
+            try res.append(' ');
+        }
+
         try res.appendSlice(line);
         try res.append('\n');
+        i = 1;
     }
 
     // The caller must free memory
